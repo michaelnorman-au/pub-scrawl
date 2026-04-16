@@ -3,38 +3,58 @@
 import { useEffect, useRef } from "react";
 import type {
   Map as MapLibreMap,
-  GeoJSONSource,
-  MapGeoJSONFeature,
+  Marker as MapLibreMarker,
 } from "maplibre-gl";
-import type { Venue } from "@/lib/types";
+import type { Submission, Venue } from "@/lib/types";
 
 export type FocusTarget = { venue: Venue };
 
 type Props = {
   venues: Venue[];
-  onVenueSelect: (venue: Venue) => void;
+  submissions: Submission[];
   focus: FocusTarget | null;
+  onFileDrop: (file: File, lng: number, lat: number) => void;
+  onMapTap: (lng: number, lat: number) => void;
+  onPhotoClick: (submission: Submission) => void;
 };
 
-export default function Map({ venues, onVenueSelect, focus }: Props) {
+export default function Map({
+  venues,
+  submissions,
+  focus,
+  onFileDrop,
+  onMapTap,
+  onPhotoClick,
+}: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
   const venuesRef = useRef(venues);
-  const onVenueSelectRef = useRef(onVenueSelect);
+  const markersRef = useRef<globalThis.Map<string, MapLibreMarker>>(
+    new globalThis.Map(),
+  );
+
+  const onFileDropRef = useRef(onFileDrop);
+  const onMapTapRef = useRef(onMapTap);
+  const onPhotoClickRef = useRef(onPhotoClick);
 
   useEffect(() => {
-    onVenueSelectRef.current = onVenueSelect;
-  }, [onVenueSelect]);
+    onFileDropRef.current = onFileDrop;
+    onMapTapRef.current = onMapTap;
+    onPhotoClickRef.current = onPhotoClick;
+  });
 
+  // Update venue labels source when venues change.
   useEffect(() => {
     venuesRef.current = venues;
     const map = mapRef.current;
-    if (map && map.isStyleLoaded()) {
-      const src = map.getSource("venues") as GeoJSONSource | undefined;
-      src?.setData(toGeoJSON(venues));
-    }
+    if (!map || !map.isStyleLoaded()) return;
+    const src = map.getSource("venues") as
+      | { setData: (d: GeoJSON.FeatureCollection) => void }
+      | undefined;
+    src?.setData(venuesToGeoJSON(venues));
   }, [venues]);
 
+  // Fly to a searched venue.
   useEffect(() => {
     if (!focus) return;
     const map = mapRef.current;
@@ -49,12 +69,60 @@ export default function Map({ venues, onVenueSelect, focus }: Props) {
     });
   }, [focus]);
 
+  // Diff-sync submission markers to the `submissions` prop.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const want = new Set<string>();
+    for (const s of submissions) want.add(s.id);
+
+    // Remove gone
+    for (const [id, marker] of markersRef.current) {
+      if (!want.has(id)) {
+        marker.remove();
+        markersRef.current.delete(id);
+      }
+    }
+
+    // Add new
+    (async () => {
+      const mod = await import("maplibre-gl");
+      const maplibregl = mod.default ?? mod;
+      for (const s of submissions) {
+        if (markersRef.current.has(s.id)) continue;
+        if (s.lat == null || s.lng == null) continue;
+
+        const img = document.createElement("img");
+        img.src = s.photo_url;
+        img.alt = "";
+        img.loading = "lazy";
+        img.style.width = "60px";
+        img.style.height = "60px";
+        img.style.objectFit = "cover";
+        img.style.borderRadius = "4px";
+        img.style.border = "2px solid white";
+        img.style.boxShadow = "0 2px 8px rgba(0,0,0,0.35)";
+        img.style.cursor = "zoom-in";
+        img.style.display = "block";
+        img.addEventListener("click", (e) => {
+          e.stopPropagation();
+          onPhotoClickRef.current(s);
+        });
+
+        const marker = new maplibregl.Marker({ element: img, anchor: "center" })
+          .setLngLat([s.lng, s.lat])
+          .addTo(map);
+
+        markersRef.current.set(s.id, marker);
+      }
+    })();
+  }, [submissions]);
+
+  // Init map once.
   useEffect(() => {
     let cancelled = false;
 
     (async () => {
-      // MapLibre v5's module shape puts the namespace under `default` in some
-      // bundlers but flat in others — accept either.
       const mod = await import("maplibre-gl");
       const maplibregl = mod.default ?? mod;
       if (cancelled || !containerRef.current) return;
@@ -92,13 +160,13 @@ export default function Map({ venues, onVenueSelect, focus }: Props) {
         "top-right",
       );
 
-      // Keep gestures simple: pan + pinch-zoom only. No pitch, no rotation.
+      // Keep gestures simple: pan + pinch-zoom only.
       map.dragRotate.disable();
       map.touchZoomRotate.disableRotation();
       map.touchPitch.disable();
 
-      // Custom wheel handling: trackpad two-finger scroll pans; pinch
-      // (browsers fire wheel + ctrlKey for pinch gestures) zooms.
+      // Custom wheel: trackpad two-finger scroll pans; pinch (wheel + ctrlKey)
+      // zooms.
       map.scrollZoom.disable();
       map.getCanvas().addEventListener(
         "wheel",
@@ -116,100 +184,68 @@ export default function Map({ venues, onVenueSelect, focus }: Props) {
       map.on("load", () => {
         map.addSource("venues", {
           type: "geojson",
-          data: toGeoJSON(venuesRef.current),
-          cluster: true,
-          clusterMaxZoom: 14,
-          clusterRadius: 50,
+          data: venuesToGeoJSON(venuesRef.current),
         });
 
         map.addLayer({
-          id: "clusters",
-          type: "circle",
-          source: "venues",
-          filter: ["has", "point_count"],
-          paint: {
-            "circle-color": "#111",
-            "circle-radius": [
-              "step",
-              ["get", "point_count"],
-              15,
-              50,
-              20,
-              200,
-              25,
-              1000,
-              30,
-            ],
-            "circle-stroke-width": 2,
-            "circle-stroke-color": "#fff",
-          },
-        });
-
-        map.addLayer({
-          id: "cluster-count",
+          id: "venue-labels",
           type: "symbol",
           source: "venues",
-          filter: ["has", "point_count"],
+          minzoom: 14,
           layout: {
-            "text-field": "{point_count_abbreviated}",
-            "text-size": 12,
+            "text-field": ["get", "name"],
+            "text-size": 11,
+            "text-font": ["Noto Sans Regular"],
+            "text-anchor": "center",
+            "text-allow-overlap": false,
+            "text-optional": true,
+            "text-padding": 2,
           },
-          paint: { "text-color": "#fff" },
-        });
-
-        map.addLayer({
-          id: "unclustered-point",
-          type: "circle",
-          source: "venues",
-          filter: ["!", ["has", "point_count"]],
           paint: {
-            "circle-color": "#111",
-            "circle-radius": 7,
-            "circle-stroke-width": 2,
-            "circle-stroke-color": "#fff",
+            "text-color": "#222",
+            "text-halo-color": "#fff",
+            "text-halo-width": 1.5,
           },
         });
-
-        map.on("click", "clusters", async (e) => {
-          const features = map.queryRenderedFeatures(e.point, {
-            layers: ["clusters"],
-          });
-          const feature = features[0];
-          const clusterId = feature?.properties?.cluster_id;
-          if (clusterId == null) return;
-          const src = map.getSource("venues") as GeoJSONSource;
-          const zoom = await src.getClusterExpansionZoom(clusterId);
-          const coords = (feature.geometry as GeoJSON.Point).coordinates as [
-            number,
-            number,
-          ];
-          map.easeTo({ center: coords, zoom });
-        });
-
-        map.on("click", "unclustered-point", (e) => {
-          const feature = e.features?.[0] as MapGeoJSONFeature | undefined;
-          if (!feature) return;
-          const id = feature.properties?.id as string | undefined;
-          if (!id) return;
-          const venue = venuesRef.current.find((v) => v.id === id);
-          if (venue) onVenueSelectRef.current(venue);
-        });
-
-        for (const layer of ["clusters", "unclustered-point"] as const) {
-          map.on("mouseenter", layer, () => {
-            map.getCanvas().style.cursor = "pointer";
-          });
-          map.on("mouseleave", layer, () => {
-            map.getCanvas().style.cursor = "";
-          });
-        }
       });
+
+      // Drag-and-drop files to upload at the drop location (desktop).
+      const container = containerRef.current;
+      container.addEventListener("dragover", (e) => {
+        e.preventDefault();
+        if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+      });
+      container.addEventListener("drop", (e) => {
+        e.preventDefault();
+        const file = e.dataTransfer?.files?.[0];
+        if (!file) return;
+        const rect = container.getBoundingClientRect();
+        const { lng, lat } = map.unproject([
+          e.clientX - rect.left,
+          e.clientY - rect.top,
+        ]);
+        onFileDropRef.current(file, lng, lat);
+      });
+
+      // Tap on touch devices to open the file picker at the tap location.
+      // MapLibre already distinguishes tap vs drag internally — its `click`
+      // event only fires for taps that didn't drag.
+      const isTouch =
+        typeof window !== "undefined" &&
+        window.matchMedia("(hover: none) and (pointer: coarse)").matches;
+      if (isTouch) {
+        map.on("click", (e) => {
+          onMapTapRef.current(e.lngLat.lng, e.lngLat.lat);
+        });
+      }
 
       mapRef.current = map;
     })();
 
     return () => {
       cancelled = true;
+      for (const m of markersRef.current.values()) m.remove();
+      markersRef.current.clear();
       mapRef.current?.remove();
       mapRef.current = null;
     };
@@ -218,7 +254,9 @@ export default function Map({ venues, onVenueSelect, focus }: Props) {
   return <div ref={containerRef} className="w-full h-full" />;
 }
 
-function toGeoJSON(venues: Venue[]): GeoJSON.FeatureCollection<GeoJSON.Point> {
+function venuesToGeoJSON(
+  venues: Venue[],
+): GeoJSON.FeatureCollection<GeoJSON.Point> {
   const features: GeoJSON.Feature<GeoJSON.Point>[] = [];
   for (const v of venues) {
     const lng = Number(v.lng);

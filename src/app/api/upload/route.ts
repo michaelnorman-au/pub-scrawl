@@ -14,6 +14,9 @@ const ALLOWED_MIME = new Set([
   "image/heif",
 ]);
 
+// Greater London bbox — reject coords outside this.
+const BBOX = { minLng: -0.55, minLat: 51.25, maxLng: 0.35, maxLat: 51.75 };
+
 export async function POST(req: NextRequest) {
   let form: FormData;
   try {
@@ -23,13 +26,12 @@ export async function POST(req: NextRequest) {
   }
 
   const file = form.get("file");
-  const venueId = form.get("venue_id");
+  const latRaw = form.get("lat");
+  const lngRaw = form.get("lng");
+  const venueIdRaw = form.get("venue_id");
 
   if (!(file instanceof File)) {
     return NextResponse.json({ error: "file required" }, { status: 400 });
-  }
-  if (typeof venueId !== "string" || venueId.length === 0) {
-    return NextResponse.json({ error: "venue_id required" }, { status: 400 });
   }
   if (file.size > MAX_BYTES) {
     return NextResponse.json({ error: "file too large" }, { status: 413 });
@@ -41,9 +43,32 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  const lat = typeof latRaw === "string" ? Number(latRaw) : NaN;
+  const lng = typeof lngRaw === "string" ? Number(lngRaw) : NaN;
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    return NextResponse.json(
+      { error: "lat and lng required" },
+      { status: 400 },
+    );
+  }
+  if (
+    lat < BBOX.minLat ||
+    lat > BBOX.maxLat ||
+    lng < BBOX.minLng ||
+    lng > BBOX.maxLng
+  ) {
+    return NextResponse.json(
+      { error: "coordinates outside London" },
+      { status: 400 },
+    );
+  }
+
+  const venueId =
+    typeof venueIdRaw === "string" && venueIdRaw.length > 0 ? venueIdRaw : null;
+
   // Re-encode to JPEG. This strips EXIF (GPS + device metadata) and caps
-  // pixel size. `rotate()` with no args applies the EXIF orientation
-  // before the strip so the image isn't sideways.
+  // pixel size. `rotate()` applies the EXIF orientation before the strip
+  // so the image isn't sideways.
   const input = Buffer.from(await file.arrayBuffer());
   let output: Buffer;
   try {
@@ -65,7 +90,7 @@ export async function POST(req: NextRequest) {
   }
 
   const supabase = supabaseServer();
-  const path = `${venueId}/${randomUUID()}.jpg`;
+  const path = `${randomUUID()}.jpg`;
 
   const { error: uploadErr } = await supabase.storage
     .from("submissions")
@@ -84,12 +109,11 @@ export async function POST(req: NextRequest) {
 
   const { data: row, error: insertErr } = await supabase
     .from("submissions")
-    .insert({ venue_id: venueId, photo_url: publicUrl })
-    .select("id, venue_id, photo_url, created_at")
+    .insert({ venue_id: venueId, photo_url: publicUrl, lat, lng })
+    .select("id, venue_id, photo_url, lat, lng, created_at")
     .single();
 
   if (insertErr) {
-    // Roll back the upload if the DB rejected the row (e.g. bad venue_id).
     await supabase.storage.from("submissions").remove([path]);
     return NextResponse.json(
       { error: "could not save submission" },

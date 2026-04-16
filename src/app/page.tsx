@@ -1,9 +1,12 @@
 import MapShell from "@/components/MapShell";
-import { fetchVenues } from "@/lib/queries";
+import { fetchSubmissions, fetchVenues } from "@/lib/queries";
 
 export const revalidate = 60;
 
 export default async function Home() {
-  const venues = await fetchVenues();
-  return <MapShell venues={venues} />;
+  const [venues, initialSubmissions] = await Promise.all([
+    fetchVenues(),
+    fetchSubmissions(),
+  ]);
+  return <MapShell venues={venues} initialSubmissions={initialSubmissions} />;
 }

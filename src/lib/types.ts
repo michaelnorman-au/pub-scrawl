@@ -9,7 +9,9 @@ export type Venue = {
 
 export type Submission = {
   id: string;
-  venue_id: string;
+  venue_id: string | null;
   photo_url: string;
+  lat: number | null;
+  lng: number | null;
   created_at: string;
 };
