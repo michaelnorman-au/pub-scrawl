@@ -8,12 +8,15 @@ import type {
 } from "maplibre-gl";
 import type { Venue } from "@/lib/types";
 
+export type FocusTarget = { venue: Venue };
+
 type Props = {
   venues: Venue[];
   onVenueSelect: (venue: Venue) => void;
+  focus: FocusTarget | null;
 };
 
-export default function Map({ venues, onVenueSelect }: Props) {
+export default function Map({ venues, onVenueSelect, focus }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
   const venuesRef = useRef(venues);
@@ -31,6 +34,20 @@ export default function Map({ venues, onVenueSelect }: Props) {
       src?.setData(toGeoJSON(venues));
     }
   }, [venues]);
+
+  useEffect(() => {
+    if (!focus) return;
+    const map = mapRef.current;
+    if (!map) return;
+    const lng = Number(focus.venue.lng);
+    const lat = Number(focus.venue.lat);
+    if (!Number.isFinite(lng) || !Number.isFinite(lat)) return;
+    map.easeTo({
+      center: [lng, lat],
+      zoom: Math.max(map.getZoom(), 16),
+      duration: 600,
+    });
+  }, [focus]);
 
   useEffect(() => {
     let cancelled = false;
@@ -73,6 +90,27 @@ export default function Map({ venues, onVenueSelect }: Props) {
       map.addControl(
         new maplibregl.NavigationControl({ showCompass: false }),
         "top-right",
+      );
+
+      // Keep gestures simple: pan + pinch-zoom only. No pitch, no rotation.
+      map.dragRotate.disable();
+      map.touchZoomRotate.disableRotation();
+      map.touchPitch.disable();
+
+      // Custom wheel handling: trackpad two-finger scroll pans; pinch
+      // (browsers fire wheel + ctrlKey for pinch gestures) zooms.
+      map.scrollZoom.disable();
+      map.getCanvas().addEventListener(
+        "wheel",
+        (e) => {
+          e.preventDefault();
+          if (e.ctrlKey) {
+            map.zoomTo(map.getZoom() - e.deltaY / 100, { duration: 0 });
+          } else {
+            map.panBy([e.deltaX, e.deltaY], { duration: 0 });
+          }
+        },
+        { passive: false },
       );
 
       map.on("load", () => {
