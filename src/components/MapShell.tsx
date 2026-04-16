@@ -13,7 +13,7 @@ export default function MapShell({ venues }: Props) {
   const [selected, setSelected] = useState<Venue | null>(null);
 
   return (
-    <div className="relative w-screen h-[100dvh]">
+    <div className="relative w-screen h-screen">
       <Map venues={venues} onVenueSelect={setSelected} />
       <VenuePanel venue={selected} onClose={() => setSelected(null)} />
     </div>

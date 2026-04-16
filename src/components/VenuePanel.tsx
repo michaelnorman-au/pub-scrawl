@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { fetchSubmissionsForVenue } from "@/lib/queries";
 import type { Submission, Venue } from "@/lib/types";
 
@@ -9,13 +9,21 @@ type Props = {
   onClose: () => void;
 };
 
+type UploadState =
+  | { status: "idle" }
+  | { status: "uploading" }
+  | { status: "error"; message: string };
+
 export default function VenuePanel({ venue, onClose }: Props) {
   const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [loading, setLoading] = useState(false);
+  const [upload, setUpload] = useState<UploadState>({ status: "idle" });
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!venue) {
       setSubmissions([]);
+      setUpload({ status: "idle" });
       return;
     }
     let cancelled = false;
@@ -33,6 +41,36 @@ export default function VenuePanel({ venue, onClose }: Props) {
   }, [venue]);
 
   if (!venue) return null;
+
+  async function onFilePicked(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // allow re-picking the same file
+    if (!file || !venue) return;
+
+    setUpload({ status: "uploading" });
+    try {
+      const body = new FormData();
+      body.append("file", file);
+      body.append("venue_id", venue.id);
+      const res = await fetch("/api/upload", { method: "POST", body });
+      if (!res.ok) {
+        const { error } = await res
+          .json()
+          .catch(() => ({ error: "upload failed" }));
+        throw new Error(error ?? "upload failed");
+      }
+      const { submission } = (await res.json()) as { submission: Submission };
+      setSubmissions((prev) => [submission, ...prev]);
+      setUpload({ status: "idle" });
+    } catch (err) {
+      setUpload({
+        status: "error",
+        message: err instanceof Error ? err.message : "upload failed",
+      });
+    }
+  }
+
+  const uploading = upload.status === "uploading";
 
   return (
     <div
@@ -58,11 +96,37 @@ export default function VenuePanel({ venue, onClose }: Props) {
         </button>
       </div>
 
-      <div className="p-4">
+      <div className="p-4 space-y-4">
+        <div>
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading}
+            className="w-full py-3 text-sm font-medium bg-black text-white rounded hover:bg-zinc-800 disabled:bg-zinc-400"
+          >
+            {uploading ? "Uploading…" : "Upload a photo"}
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            className="hidden"
+            onChange={onFilePicked}
+          />
+          {upload.status === "error" && (
+            <p className="mt-2 text-sm text-red-600">
+              Couldn&apos;t upload: {upload.message}
+            </p>
+          )}
+        </div>
+
         {loading ? (
           <p className="text-sm text-zinc-500">Loading…</p>
         ) : submissions.length === 0 ? (
-          <p className="text-sm text-zinc-500">No submissions yet.</p>
+          <p className="text-sm text-zinc-500">
+            No submissions yet. Be the first.
+          </p>
         ) : (
           <div className="grid grid-cols-2 gap-2">
             {submissions.map((s) => (
