@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import sharp from "sharp";
 import { createHash, randomUUID } from "node:crypto";
 import { supabaseServer } from "@/lib/supabase-server";
+import { clientIp, uploadLimiter } from "@/lib/ratelimit";
 
 export const runtime = "nodejs"; // sharp needs Node APIs
 
@@ -18,6 +19,21 @@ const ALLOWED_MIME = new Set([
 const BBOX = { minLng: -0.55, minLat: 51.25, maxLng: 0.35, maxLat: 51.75 };
 
 export async function POST(req: NextRequest) {
+  if (uploadLimiter) {
+    const { success, reset } = await uploadLimiter.limit(
+      `upload:${clientIp(req)}`,
+    );
+    if (!success) {
+      return NextResponse.json(
+        { error: "rate limited — try again later" },
+        {
+          status: 429,
+          headers: { "retry-after": String(Math.ceil((reset - Date.now()) / 1000)) },
+        },
+      );
+    }
+  }
+
   let form: FormData;
   try {
     form = await req.formData();

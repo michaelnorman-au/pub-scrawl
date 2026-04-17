@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createHash } from "node:crypto";
 import { supabaseServer } from "@/lib/supabase-server";
+import { clientIp, updateLimiter } from "@/lib/ratelimit";
 
 export const runtime = "nodejs";
 
@@ -17,6 +18,23 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
+
+  if (updateLimiter) {
+    const { success, reset } = await updateLimiter.limit(
+      `update:${clientIp(req)}`,
+    );
+    if (!success) {
+      return NextResponse.json(
+        { error: "rate limited — try again later" },
+        {
+          status: 429,
+          headers: {
+            "retry-after": String(Math.ceil((reset - Date.now()) / 1000)),
+          },
+        },
+      );
+    }
+  }
 
   let body: PatchBody;
   try {

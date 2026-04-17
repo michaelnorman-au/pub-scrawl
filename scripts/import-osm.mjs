@@ -1,5 +1,5 @@
-// One-shot import of London pubs/bars/nightclubs from OpenStreetMap into Supabase.
-// Wipes existing venues + submissions, then inserts fresh.
+// Import London pubs/bars/nightclubs from OpenStreetMap into Supabase.
+// Idempotent: upserts on osm_id, never touches submissions.
 //
 // Usage:
 //   node --env-file=.env.local scripts/import-osm.mjs
@@ -22,7 +22,6 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
   auth: { persistSession: false },
 });
 
-// Greater London bounding box (matches the map's maxBounds).
 const BBOX = "51.25,-0.55,51.75,0.35";
 const OVERPASS_QUERY = `
 [out:json][timeout:180];
@@ -63,6 +62,7 @@ for (const el of osm.elements ?? []) {
   const address = addrParts.length > 0 ? addrParts.join(" ") : null;
 
   venues.push({
+    osm_id: el.id,
     name,
     address,
     lat: el.lat,
@@ -72,34 +72,18 @@ for (const el of osm.elements ?? []) {
 
 console.log(`Got ${venues.length} named venues from OSM.`);
 
-console.log("Wiping existing venues + submissions…");
-const { error: subDelErr } = await supabase
-  .from("submissions")
-  .delete()
-  .neq("id", "00000000-0000-0000-0000-000000000000");
-if (subDelErr) {
-  console.error("Failed to clear submissions:", subDelErr);
-  process.exit(1);
-}
-const { error: venDelErr } = await supabase
-  .from("venues")
-  .delete()
-  .neq("id", "00000000-0000-0000-0000-000000000000");
-if (venDelErr) {
-  console.error("Failed to clear venues:", venDelErr);
-  process.exit(1);
-}
-
-console.log("Inserting venues…");
+console.log("Upserting venues…");
 const BATCH = 500;
 for (let i = 0; i < venues.length; i += BATCH) {
   const chunk = venues.slice(i, i + BATCH);
-  const { error } = await supabase.from("venues").insert(chunk);
+  const { error } = await supabase
+    .from("venues")
+    .upsert(chunk, { onConflict: "osm_id" });
   if (error) {
-    console.error(`Insert failed at ${i}:`, error);
+    console.error(`Upsert failed at ${i}:`, error);
     process.exit(1);
   }
   console.log(`  ${Math.min(i + BATCH, venues.length)}/${venues.length}`);
 }
 
-console.log("Done.");
+console.log("Done. Submissions untouched.");
