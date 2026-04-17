@@ -93,3 +93,70 @@ export async function PATCH(
 
   return NextResponse.json({ submission: updated });
 }
+
+export async function DELETE(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const { id } = await params;
+
+  if (updateLimiter) {
+    const { success } = await updateLimiter.limit(
+      `update:${clientIp(req)}`,
+    );
+    if (!success) {
+      return NextResponse.json(
+        { error: "rate limited — try again later" },
+        { status: 429 },
+      );
+    }
+  }
+
+  const token = req.headers.get("x-owner-token");
+  if (!token) {
+    return NextResponse.json({ error: "owner_token required" }, { status: 401 });
+  }
+  const hash = createHash("sha256").update(token).digest("hex");
+
+  const supabase = supabaseServer();
+  const { data: stored } = await supabase
+    .from("submission_tokens")
+    .select("owner_token_hash")
+    .eq("submission_id", id)
+    .maybeSingle();
+
+  if (!stored || stored.owner_token_hash !== hash) {
+    return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  }
+
+  // Fetch the submission so we can derive the storage path.
+  const { data: submission } = await supabase
+    .from("submissions")
+    .select("photo_url")
+    .eq("id", id)
+    .maybeSingle();
+
+  // Delete storage object (best-effort; continue even if this fails so
+  // the DB row always clears).
+  if (submission?.photo_url) {
+    const match = submission.photo_url.match(
+      /\/public\/submissions\/(.+)$/,
+    );
+    const path = match?.[1];
+    if (path) {
+      await supabase.storage.from("submissions").remove([path]);
+    }
+  }
+
+  // Delete the row. submission_tokens cascades via FK.
+  const { error: delErr } = await supabase
+    .from("submissions")
+    .delete()
+    .eq("id", id);
+
+  if (delErr) {
+    return NextResponse.json({ error: "delete failed" }, { status: 500 });
+  }
+
+  return NextResponse.json({ ok: true });
+}

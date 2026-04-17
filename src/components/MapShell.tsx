@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Map, { type FocusTarget } from "./Map";
 import SearchBox from "./SearchBox";
 import Lightbox from "./Lightbox";
@@ -48,7 +48,8 @@ export default function MapShell({ venues, initialSubmissions }: Props) {
   const [submissions, setSubmissions] =
     useState<Submission[]>(initialSubmissions);
   const [focus, setFocus] = useState<FocusTarget | null>(null);
-  const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
+  const [lightboxSubmission, setLightboxSubmission] =
+    useState<Submission | null>(null);
   const [upload, setUpload] = useState<UploadState>({ status: "idle" });
   const [ownedIds, setOwnedIds] = useState<Set<string>>(() => new Set());
   const [pendingDialog, setPendingDialog] = useState<PendingDialog | null>(
@@ -64,6 +65,17 @@ export default function MapShell({ venues, initialSubmissions }: Props) {
     }
     if (ids.size > 0) setOwnedIds(ids);
   }
+
+  // Block document-level Ctrl+wheel (desktop trackpad pinch / Ctrl+scroll)
+  // from triggering the browser's own zoom when the user isn't over the
+  // map canvas itself.
+  useEffect(() => {
+    const onWheel = (e: WheelEvent) => {
+      if (e.ctrlKey) e.preventDefault();
+    };
+    document.addEventListener("wheel", onWheel, { passive: false });
+    return () => document.removeEventListener("wheel", onWheel);
+  }, []);
 
   const pendingCoordsRef = useRef<{ lng: number; lat: number } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -151,6 +163,35 @@ export default function MapShell({ venues, initialSubmissions }: Props) {
     uploadFile(file, coords.lng, coords.lat);
   }
 
+  async function handlePhotoDelete(submissionId: string) {
+    const token = readToken(submissionId);
+    if (!token) return;
+    try {
+      const res = await fetch(`/api/submissions/${submissionId}`, {
+        method: "DELETE",
+        headers: { "x-owner-token": token },
+      });
+      if (!res.ok) {
+        setUpload({ status: "error", message: "couldn't delete photo" });
+        return;
+      }
+      setSubmissions((prev) => prev.filter((s) => s.id !== submissionId));
+      setOwnedIds((prev) => {
+        const next = new Set(prev);
+        next.delete(submissionId);
+        return next;
+      });
+      try {
+        window.localStorage.removeItem(TOKEN_KEY_PREFIX + submissionId);
+      } catch {
+        /* ignore */
+      }
+      setLightboxSubmission(null);
+    } catch {
+      setUpload({ status: "error", message: "couldn't delete photo" });
+    }
+  }
+
   async function handlePhotoMove(
     submissionId: string,
     lng: number,
@@ -189,11 +230,22 @@ export default function MapShell({ venues, initialSubmissions }: Props) {
         ownedIds={ownedSet}
         onFileDrop={uploadFile}
         onMapTap={handleMapTap}
-        onPhotoClick={(s) => setLightboxSrc(s.photo_url)}
+        onPhotoClick={(s) => setLightboxSubmission(s)}
         onPhotoMove={handlePhotoMove}
       />
       <SearchBox venues={venues} onSelect={(v) => setFocus({ venue: v })} />
-      <Lightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} />
+      <Lightbox
+        src={lightboxSubmission?.photo_url ?? null}
+        owned={
+          lightboxSubmission ? ownedIds.has(lightboxSubmission.id) : false
+        }
+        onClose={() => setLightboxSubmission(null)}
+        onDelete={
+          lightboxSubmission
+            ? () => handlePhotoDelete(lightboxSubmission.id)
+            : undefined
+        }
+      />
 
       {pendingDialog && (
         <UploadDialog

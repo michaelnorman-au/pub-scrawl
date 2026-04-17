@@ -194,12 +194,10 @@ export default function Map({
         img.src = s.photo_url;
         img.alt = "";
         img.loading = "lazy";
-        img.style.width = "60px";
-        img.style.height = "60px";
-        img.style.objectFit = "cover";
-        img.style.borderRadius = "4px";
-        img.style.border = "2px solid white";
-        img.style.boxShadow = "0 2px 8px rgba(0,0,0,0.35)";
+        img.style.maxWidth = "80px";
+        img.style.maxHeight = "80px";
+        img.style.width = "auto";
+        img.style.height = "auto";
         img.style.cursor = owned ? "grab" : "zoom-in";
         img.style.display = "block";
         img.addEventListener("click", (e) => {

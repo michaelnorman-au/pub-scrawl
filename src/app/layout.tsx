@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
@@ -16,6 +16,14 @@ export const metadata: Metadata = {
   title: "Pub Scrawl",
   description:
     "A crowd-sourced map of the graffiti and scratchings inside London's pub and club toilet cubicles.",
+};
+
+// Disable browser-level zoom so the map's own zoom is unambiguous.
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
 };
 
 export default function RootLayout({
