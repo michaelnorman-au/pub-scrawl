@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type {
   Map as MapLibreMap,
   Marker as MapLibreMarker,
@@ -124,6 +124,10 @@ export default function Map({
   const markersRef = useRef<globalThis.Map<string, MapLibreMarker>>(
     new globalThis.Map(),
   );
+  // Flipped true once the map has loaded. Gates the submissions-marker
+  // effect, which otherwise races ahead of map init and silently does
+  // nothing for the initial server-hydrated submissions.
+  const [mapReady, setMapReady] = useState(false);
 
   const onFileDropRef = useRef(onFileDrop);
   const onMapTapRef = useRef(onMapTap);
@@ -167,6 +171,7 @@ export default function Map({
 
   // Diff-sync submission markers to the `submissions` prop.
   useEffect(() => {
+    if (!mapReady) return;
     const map = mapRef.current;
     if (!map) return;
     const want = new Set<string>();
@@ -237,7 +242,7 @@ export default function Map({
         markersRef.current.set(s.id, marker);
       }
     })();
-  }, [submissions]);
+  }, [submissions, mapReady]);
 
   // Sync draggability + cursor on markers when ownership changes (e.g.
   // after mount when we read localStorage).
@@ -318,6 +323,8 @@ export default function Map({
             "text-halo-width": 1.5,
           },
         });
+
+        setMapReady(true);
       });
 
       // Drag-and-drop files to upload at the drop location (desktop).

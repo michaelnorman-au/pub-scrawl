@@ -7,6 +7,7 @@ import Lightbox from "./Lightbox";
 import UploadDialog, { type UploadChoice } from "./UploadDialog";
 import InfoModal from "./InfoModal";
 import { readExifGps, type GpsCoords } from "@/lib/exif";
+import { supabase } from "@/lib/supabase";
 import type { Submission, Venue } from "@/lib/types";
 
 type Props = {
@@ -77,6 +78,49 @@ export default function MapShell({ venues, initialSubmissions }: Props) {
     };
     document.addEventListener("wheel", onWheel, { passive: false });
     return () => document.removeEventListener("wheel", onWheel);
+  }, []);
+
+  // Subscribe to realtime changes on submissions so every connected
+  // browser sees new photos / drags / deletes without a refresh.
+  useEffect(() => {
+    const channel = supabase
+      .channel("submissions-live")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "submissions" },
+        (payload) => {
+          const row = payload.new as Submission;
+          if (row.lat == null || row.lng == null) return;
+          setSubmissions((prev) => {
+            if (prev.some((s) => s.id === row.id)) return prev;
+            return [row, ...prev];
+          });
+        },
+      )
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "submissions" },
+        (payload) => {
+          const row = payload.new as Submission;
+          setSubmissions((prev) =>
+            prev.map((s) => (s.id === row.id ? row : s)),
+          );
+        },
+      )
+      .on(
+        "postgres_changes",
+        { event: "DELETE", schema: "public", table: "submissions" },
+        (payload) => {
+          const oldId = (payload.old as { id?: string })?.id;
+          if (!oldId) return;
+          setSubmissions((prev) => prev.filter((s) => s.id !== oldId));
+        },
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   // Auto-open the info modal on first visit.
