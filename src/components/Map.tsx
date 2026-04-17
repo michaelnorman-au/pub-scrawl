@@ -4,8 +4,92 @@ import { useEffect, useRef } from "react";
 import type {
   Map as MapLibreMap,
   Marker as MapLibreMarker,
+  StyleSpecification,
 } from "maplibre-gl";
 import type { Submission, Venue } from "@/lib/types";
+
+// Ghost style: OpenFreeMap vector tiles, no fills or lines — just labels
+// in light grey. Our venue labels go on top in black.
+const GHOST_STYLE: StyleSpecification = {
+  version: 8,
+  glyphs: "https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf",
+  sources: {
+    openfreemap: {
+      type: "vector",
+      url: "https://tiles.openfreemap.org/planet",
+      attribution:
+        '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors · tiles <a href="https://openfreemap.org">OpenFreeMap</a>',
+    },
+  },
+  layers: [
+    {
+      id: "background",
+      type: "background",
+      paint: { "background-color": "#ffffff" },
+    },
+    {
+      id: "place-labels",
+      type: "symbol",
+      source: "openfreemap",
+      "source-layer": "place",
+      minzoom: 8,
+      layout: {
+        "text-field": ["coalesce", ["get", "name:en"], ["get", "name"]],
+        "text-font": ["Noto Sans Regular"],
+        "text-size": [
+          "match",
+          ["get", "class"],
+          ["city"], 14,
+          ["town"], 12,
+          ["suburb", "neighbourhood"], 11,
+          10,
+        ],
+        "text-letter-spacing": 0.05,
+      },
+      paint: {
+        "text-color": "#bbbbbb",
+        "text-halo-color": "#ffffff",
+        "text-halo-width": 1.2,
+      },
+    },
+    {
+      id: "road-labels",
+      type: "symbol",
+      source: "openfreemap",
+      "source-layer": "transportation_name",
+      minzoom: 12,
+      layout: {
+        "text-field": ["coalesce", ["get", "name:en"], ["get", "name"]],
+        "text-font": ["Noto Sans Regular"],
+        "text-size": 11,
+        "symbol-placement": "line",
+      },
+      paint: {
+        "text-color": "#bbbbbb",
+        "text-halo-color": "#ffffff",
+        "text-halo-width": 1.2,
+      },
+    },
+    {
+      id: "water-labels",
+      type: "symbol",
+      source: "openfreemap",
+      "source-layer": "water_name",
+      minzoom: 10,
+      layout: {
+        "text-field": ["coalesce", ["get", "name:en"], ["get", "name"]],
+        "text-font": ["Noto Sans Italic"],
+        "text-size": 11,
+        "text-letter-spacing": 0.1,
+      },
+      paint: {
+        "text-color": "#bbbbbb",
+        "text-halo-color": "#ffffff",
+        "text-halo-width": 1.2,
+      },
+    },
+  ],
+};
 
 export type FocusTarget = { venue: Venue };
 
@@ -129,24 +213,7 @@ export default function Map({
 
       const map = new maplibregl.Map({
         container: containerRef.current,
-        style: {
-          version: 8,
-          sources: {
-            basemap: {
-              type: "raster",
-              tiles: [
-                "https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
-                "https://b.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
-                "https://c.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
-                "https://d.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
-              ],
-              tileSize: 256,
-              attribution:
-                '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, © <a href="https://carto.com/attributions">CARTO</a>',
-            },
-          },
-          layers: [{ id: "basemap", type: "raster", source: "basemap" }],
-        },
+        style: GHOST_STYLE,
         center: [-0.1276, 51.5074],
         zoom: 11,
         maxBounds: [
@@ -202,7 +269,7 @@ export default function Map({
             "text-padding": 2,
           },
           paint: {
-            "text-color": "#222",
+            "text-color": "#000",
             "text-halo-color": "#fff",
             "text-halo-width": 1.5,
           },
