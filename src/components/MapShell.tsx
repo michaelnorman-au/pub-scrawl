@@ -297,7 +297,6 @@ export default function MapShell({ venues, initialSubmissions }: Props) {
         ref={fileInputRef}
         type="file"
         accept="image/*"
-        capture="environment"
         className="hidden"
         onChange={handleFileInputChange}
       />
