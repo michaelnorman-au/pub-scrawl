@@ -268,12 +268,8 @@ export default function Map({
           [-0.55, 51.25],
           [0.35, 51.75],
         ],
+        attributionControl: false,
       });
-
-      map.addControl(
-        new maplibregl.NavigationControl({ showCompass: false }),
-        "top-right",
-      );
 
       // Keep gestures simple: pan + pinch-zoom only.
       map.dragRotate.disable();

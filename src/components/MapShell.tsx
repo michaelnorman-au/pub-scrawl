@@ -5,6 +5,7 @@ import Map, { type FocusTarget } from "./Map";
 import SearchBox from "./SearchBox";
 import Lightbox from "./Lightbox";
 import UploadDialog, { type UploadChoice } from "./UploadDialog";
+import InfoModal from "./InfoModal";
 import { readExifGps, type GpsCoords } from "@/lib/exif";
 import type { Submission, Venue } from "@/lib/types";
 
@@ -55,6 +56,7 @@ export default function MapShell({ venues, initialSubmissions }: Props) {
   const [pendingDialog, setPendingDialog] = useState<PendingDialog | null>(
     null,
   );
+  const [infoOpen, setInfoOpen] = useState(false);
 
   const hydratedRef = useRef(false);
   if (!hydratedRef.current && typeof window !== "undefined") {
@@ -76,6 +78,26 @@ export default function MapShell({ venues, initialSubmissions }: Props) {
     document.addEventListener("wheel", onWheel, { passive: false });
     return () => document.removeEventListener("wheel", onWheel);
   }, []);
+
+  // Auto-open the info modal on first visit.
+  useEffect(() => {
+    try {
+      if (window.localStorage.getItem("pubscrawl:seen-info") !== "1") {
+        setInfoOpen(true);
+      }
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  function closeInfo() {
+    setInfoOpen(false);
+    try {
+      window.localStorage.setItem("pubscrawl:seen-info", "1");
+    } catch {
+      /* ignore */
+    }
+  }
 
   const pendingCoordsRef = useRef<{ lng: number; lat: number } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -233,7 +255,19 @@ export default function MapShell({ venues, initialSubmissions }: Props) {
         onPhotoClick={(s) => setLightboxSubmission(s)}
         onPhotoMove={handlePhotoMove}
       />
-      <SearchBox venues={venues} onSelect={(v) => setFocus({ venue: v })} />
+      <div className="fixed z-20 bottom-16 left-1/2 -translate-x-1/2 flex items-center gap-2 w-[min(calc(100%-1.5rem),420px)]">
+        <div className="flex-1">
+          <SearchBox venues={venues} onSelect={(v) => setFocus({ venue: v })} />
+        </div>
+        <button
+          type="button"
+          onClick={() => setInfoOpen(true)}
+          aria-label="About Pub Scrawl"
+          className="shrink-0 w-11 h-11 rounded-full bg-white/95 backdrop-blur shadow-lg text-zinc-500 text-sm hover:bg-white flex items-center justify-center"
+        >
+          i
+        </button>
+      </div>
       <Lightbox
         src={lightboxSubmission?.photo_url ?? null}
         owned={
@@ -276,9 +310,7 @@ export default function MapShell({ venues, initialSubmissions }: Props) {
         </div>
       )}
 
-      <div className="pointer-events-none fixed z-10 bottom-3 right-3 text-[11px] text-zinc-700 bg-white/80 backdrop-blur px-2 py-1 rounded">
-        Drag a photo onto the map · tap the map on mobile
-      </div>
+      <InfoModal open={infoOpen} onClose={closeInfo} />
     </div>
   );
 }

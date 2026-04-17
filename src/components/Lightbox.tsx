@@ -58,7 +58,7 @@ export default function Lightbox({ src, owned, onClose, onDelete }: Props) {
               onDelete();
             }
           }}
-          className="absolute top-4 left-4 text-white text-sm px-3 py-1.5 rounded bg-red-600/90 hover:bg-red-600"
+          className="absolute top-4 left-4 text-white text-sm px-3 py-1.5 bg-red-600/90 hover:bg-red-600"
         >
           Delete
         </button>

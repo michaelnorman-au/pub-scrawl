@@ -37,7 +37,7 @@ export default function SearchBox({ venues, onSelect }: Props) {
   }
 
   return (
-    <div className="fixed z-20 top-3 left-3 right-3 md:left-4 md:right-auto md:w-[360px]">
+    <div className="relative w-full">
       <input
         ref={inputRef}
         type="text"
@@ -48,7 +48,6 @@ export default function SearchBox({ venues, onSelect }: Props) {
         }}
         onFocus={() => setOpen(true)}
         onBlur={() => {
-          // Delay so a click on a result can register before we close.
           window.setTimeout(() => setOpen(false), 150);
         }}
         onKeyDown={(e) => {
@@ -59,10 +58,10 @@ export default function SearchBox({ venues, onSelect }: Props) {
           }
         }}
         placeholder="Search venues…"
-        className="w-full px-4 py-3 bg-white/95 backdrop-blur shadow-lg rounded-lg text-sm text-zinc-900 placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-black/10"
+        className="w-full px-4 py-3 bg-white/95 backdrop-blur shadow-lg text-sm text-zinc-900 placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-black/10"
       />
       {open && results.length > 0 && (
-        <ul className="mt-1 bg-white rounded-lg shadow-lg overflow-hidden max-h-[60vh] overflow-y-auto">
+        <ul className="absolute bottom-full left-0 right-0 mb-1 bg-white shadow-lg overflow-hidden max-h-[60vh] overflow-y-auto">
           {results.map((v) => (
             <li key={v.id}>
               <button
