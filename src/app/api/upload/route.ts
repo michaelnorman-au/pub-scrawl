@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import sharp from "sharp";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { supabaseServer } from "@/lib/supabase-server";
 
 export const runtime = "nodejs"; // sharp needs Node APIs
@@ -121,5 +121,19 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  return NextResponse.json({ submission: row });
+  // Mint an owner token so the uploader's browser can later move this
+  // photo. We only store the hash; the plaintext is returned once.
+  const ownerToken = randomUUID();
+  const ownerTokenHash = createHash("sha256")
+    .update(ownerToken)
+    .digest("hex");
+  const { error: tokenErr } = await supabase
+    .from("submission_tokens")
+    .insert({ submission_id: row.id, owner_token_hash: ownerTokenHash });
+  if (tokenErr) {
+    // Non-fatal: the photo is live, just without a drag affordance.
+    console.error("[upload] failed to store owner token", tokenErr);
+  }
+
+  return NextResponse.json({ submission: row, owner_token: ownerToken });
 }

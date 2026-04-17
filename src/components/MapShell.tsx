@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import Map, { type FocusTarget } from "./Map";
 import SearchBox from "./SearchBox";
 import Lightbox from "./Lightbox";
@@ -16,13 +16,46 @@ type UploadState =
   | { status: "uploading" }
   | { status: "error"; message: string };
 
+const TOKEN_KEY_PREFIX = "pubscrawl:token:";
+
+function readToken(submissionId: string): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return window.localStorage.getItem(TOKEN_KEY_PREFIX + submissionId);
+  } catch {
+    return null;
+  }
+}
+
+function writeToken(submissionId: string, token: string) {
+  try {
+    window.localStorage.setItem(TOKEN_KEY_PREFIX + submissionId, token);
+  } catch {
+    /* ignore */
+  }
+}
+
 export default function MapShell({ venues, initialSubmissions }: Props) {
-  const [submissions, setSubmissions] = useState<Submission[]>(initialSubmissions);
+  const [submissions, setSubmissions] =
+    useState<Submission[]>(initialSubmissions);
   const [focus, setFocus] = useState<FocusTarget | null>(null);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const [upload, setUpload] = useState<UploadState>({ status: "idle" });
+  // Track which submission IDs this browser "owns". Updated on mount
+  // (from localStorage) and whenever we upload.
+  const [ownedIds, setOwnedIds] = useState<Set<string>>(() => new Set());
 
-  // For mobile tap-to-upload: remember coords, open file picker, upload on change.
+  // Populate ownedIds on mount from localStorage.
+  const hydratedRef = useRef(false);
+  if (!hydratedRef.current && typeof window !== "undefined") {
+    hydratedRef.current = true;
+    const ids = new Set<string>();
+    for (const s of initialSubmissions) {
+      if (readToken(s.id)) ids.add(s.id);
+    }
+    if (ids.size > 0) setOwnedIds(ids);
+  }
+
   const pendingCoordsRef = useRef<{ lng: number; lat: number } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -40,7 +73,18 @@ export default function MapShell({ venues, initialSubmissions }: Props) {
           .catch(() => ({ error: "upload failed" }));
         throw new Error(error ?? "upload failed");
       }
-      const { submission } = (await res.json()) as { submission: Submission };
+      const { submission, owner_token } = (await res.json()) as {
+        submission: Submission;
+        owner_token: string;
+      };
+      if (owner_token) {
+        writeToken(submission.id, owner_token);
+        setOwnedIds((prev) => {
+          const next = new Set(prev);
+          next.add(submission.id);
+          return next;
+        });
+      }
       setSubmissions((prev) => [submission, ...prev]);
       setUpload({ status: "idle" });
     } catch (err) {
@@ -65,20 +109,52 @@ export default function MapShell({ venues, initialSubmissions }: Props) {
     uploadFile(file, coords.lng, coords.lat);
   }
 
+  async function handlePhotoMove(
+    submissionId: string,
+    lng: number,
+    lat: number,
+  ): Promise<boolean> {
+    const token = readToken(submissionId);
+    if (!token) return false;
+    try {
+      const res = await fetch(`/api/submissions/${submissionId}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ lng, lat, owner_token: token }),
+      });
+      if (!res.ok) {
+        setUpload({
+          status: "error",
+          message: "couldn't move photo",
+        });
+        return false;
+      }
+      const { submission } = (await res.json()) as { submission: Submission };
+      setSubmissions((prev) =>
+        prev.map((s) => (s.id === submission.id ? submission : s)),
+      );
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  // Memo so Map doesn't re-render unnecessarily.
+  const ownedSet = useMemo(() => ownedIds, [ownedIds]);
+
   return (
     <div className="relative w-screen h-screen">
       <Map
         venues={venues}
         submissions={submissions}
         focus={focus}
+        ownedIds={ownedSet}
         onFileDrop={uploadFile}
         onMapTap={handleMapTap}
         onPhotoClick={(s) => setLightboxSrc(s.photo_url)}
+        onPhotoMove={handlePhotoMove}
       />
-      <SearchBox
-        venues={venues}
-        onSelect={(v) => setFocus({ venue: v })}
-      />
+      <SearchBox venues={venues} onSelect={(v) => setFocus({ venue: v })} />
       <Lightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} />
 
       <input
@@ -90,7 +166,6 @@ export default function MapShell({ venues, initialSubmissions }: Props) {
         onChange={handleFileInputChange}
       />
 
-      {/* Upload status toast */}
       {upload.status !== "idle" && (
         <div className="fixed z-30 bottom-4 left-1/2 -translate-x-1/2 bg-black text-white text-sm px-4 py-2 rounded-lg shadow-lg">
           {upload.status === "uploading"
@@ -99,7 +174,6 @@ export default function MapShell({ venues, initialSubmissions }: Props) {
         </div>
       )}
 
-      {/* First-time hint */}
       <div className="pointer-events-none fixed z-10 bottom-3 right-3 text-[11px] text-zinc-700 bg-white/80 backdrop-blur px-2 py-1 rounded">
         Drag a photo onto the map · tap the map on mobile
       </div>

@@ -97,18 +97,26 @@ type Props = {
   venues: Venue[];
   submissions: Submission[];
   focus: FocusTarget | null;
+  ownedIds: Set<string>;
   onFileDrop: (file: File, lng: number, lat: number) => void;
   onMapTap: (lng: number, lat: number) => void;
   onPhotoClick: (submission: Submission) => void;
+  onPhotoMove: (
+    submissionId: string,
+    lng: number,
+    lat: number,
+  ) => Promise<boolean>;
 };
 
 export default function Map({
   venues,
   submissions,
   focus,
+  ownedIds,
   onFileDrop,
   onMapTap,
   onPhotoClick,
+  onPhotoMove,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
@@ -120,11 +128,15 @@ export default function Map({
   const onFileDropRef = useRef(onFileDrop);
   const onMapTapRef = useRef(onMapTap);
   const onPhotoClickRef = useRef(onPhotoClick);
+  const onPhotoMoveRef = useRef(onPhotoMove);
+  const ownedIdsRef = useRef(ownedIds);
 
   useEffect(() => {
     onFileDropRef.current = onFileDrop;
     onMapTapRef.current = onMapTap;
     onPhotoClickRef.current = onPhotoClick;
+    onPhotoMoveRef.current = onPhotoMove;
+    ownedIdsRef.current = ownedIds;
   });
 
   // Update venue labels source when venues change.
@@ -176,6 +188,8 @@ export default function Map({
         if (markersRef.current.has(s.id)) continue;
         if (s.lat == null || s.lng == null) continue;
 
+        const owned = ownedIdsRef.current.has(s.id);
+
         const img = document.createElement("img");
         img.src = s.photo_url;
         img.alt = "";
@@ -186,21 +200,57 @@ export default function Map({
         img.style.borderRadius = "4px";
         img.style.border = "2px solid white";
         img.style.boxShadow = "0 2px 8px rgba(0,0,0,0.35)";
-        img.style.cursor = "zoom-in";
+        img.style.cursor = owned ? "grab" : "zoom-in";
         img.style.display = "block";
         img.addEventListener("click", (e) => {
           e.stopPropagation();
           onPhotoClickRef.current(s);
         });
+        // Prevent browser-default image drag from stealing HTML5 drag
+        // events — we want MapLibre to own the drag when draggable.
+        img.draggable = false;
 
-        const marker = new maplibregl.Marker({ element: img, anchor: "center" })
+        const marker = new maplibregl.Marker({
+          element: img,
+          anchor: "center",
+          draggable: owned,
+        })
           .setLngLat([s.lng, s.lat])
           .addTo(map);
+
+        // Revert coords if the PATCH fails.
+        let origLng = s.lng;
+        let origLat = s.lat;
+        marker.on("dragstart", () => {
+          const ll = marker.getLngLat();
+          origLng = ll.lng;
+          origLat = ll.lat;
+          img.style.cursor = "grabbing";
+        });
+        marker.on("dragend", async () => {
+          img.style.cursor = ownedIdsRef.current.has(s.id) ? "grab" : "zoom-in";
+          const { lng, lat } = marker.getLngLat();
+          const ok = await onPhotoMoveRef.current(s.id, lng, lat);
+          if (!ok) {
+            marker.setLngLat([origLng, origLat]);
+          }
+        });
 
         markersRef.current.set(s.id, marker);
       }
     })();
   }, [submissions]);
+
+  // Sync draggability + cursor on markers when ownership changes (e.g.
+  // after mount when we read localStorage).
+  useEffect(() => {
+    for (const [id, marker] of markersRef.current) {
+      const owned = ownedIds.has(id);
+      marker.setDraggable(owned);
+      const el = marker.getElement() as HTMLImageElement;
+      el.style.cursor = owned ? "grab" : "zoom-in";
+    }
+  }, [ownedIds]);
 
   // Init map once.
   useEffect(() => {
