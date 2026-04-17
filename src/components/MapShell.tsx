@@ -4,6 +4,8 @@ import { useMemo, useRef, useState } from "react";
 import Map, { type FocusTarget } from "./Map";
 import SearchBox from "./SearchBox";
 import Lightbox from "./Lightbox";
+import UploadDialog, { type UploadChoice } from "./UploadDialog";
+import { readExifGps, type GpsCoords } from "@/lib/exif";
 import type { Submission, Venue } from "@/lib/types";
 
 type Props = {
@@ -15,6 +17,13 @@ type UploadState =
   | { status: "idle" }
   | { status: "uploading" }
   | { status: "error"; message: string };
+
+type PendingDialog = {
+  exifCoords: GpsCoords;
+  dropCoords: GpsCoords;
+  previewSrc: string;
+  resolve: (choice: UploadChoice) => void;
+};
 
 const TOKEN_KEY_PREFIX = "pubscrawl:token:";
 
@@ -41,11 +50,11 @@ export default function MapShell({ venues, initialSubmissions }: Props) {
   const [focus, setFocus] = useState<FocusTarget | null>(null);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const [upload, setUpload] = useState<UploadState>({ status: "idle" });
-  // Track which submission IDs this browser "owns". Updated on mount
-  // (from localStorage) and whenever we upload.
   const [ownedIds, setOwnedIds] = useState<Set<string>>(() => new Set());
+  const [pendingDialog, setPendingDialog] = useState<PendingDialog | null>(
+    null,
+  );
 
-  // Populate ownedIds on mount from localStorage.
   const hydratedRef = useRef(false);
   if (!hydratedRef.current && typeof window !== "undefined") {
     hydratedRef.current = true;
@@ -59,13 +68,46 @@ export default function MapShell({ venues, initialSubmissions }: Props) {
   const pendingCoordsRef = useRef<{ lng: number; lat: number } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  function askUserForLocation(
+    exifCoords: GpsCoords,
+    dropCoords: GpsCoords,
+    previewSrc: string,
+  ): Promise<UploadChoice> {
+    return new Promise<UploadChoice>((resolve) => {
+      setPendingDialog({ exifCoords, dropCoords, previewSrc, resolve });
+    });
+  }
+
   async function uploadFile(file: File, lng: number, lat: number) {
+    const exif = await readExifGps(file);
+
+    let finalLng = lng;
+    let finalLat = lat;
+
+    if (exif) {
+      const previewSrc = URL.createObjectURL(file);
+      try {
+        const choice = await askUserForLocation(
+          exif,
+          { lat, lng },
+          previewSrc,
+        );
+        if (choice === "cancel") return;
+        if (choice === "exif") {
+          finalLng = exif.lng;
+          finalLat = exif.lat;
+        }
+      } finally {
+        URL.revokeObjectURL(previewSrc);
+      }
+    }
+
     setUpload({ status: "uploading" });
     try {
       const body = new FormData();
       body.append("file", file);
-      body.append("lng", String(lng));
-      body.append("lat", String(lat));
+      body.append("lng", String(finalLng));
+      body.append("lat", String(finalLat));
       const res = await fetch("/api/upload", { method: "POST", body });
       if (!res.ok) {
         const { error } = await res
@@ -123,10 +165,7 @@ export default function MapShell({ venues, initialSubmissions }: Props) {
         body: JSON.stringify({ lng, lat, owner_token: token }),
       });
       if (!res.ok) {
-        setUpload({
-          status: "error",
-          message: "couldn't move photo",
-        });
+        setUpload({ status: "error", message: "couldn't move photo" });
         return false;
       }
       const { submission } = (await res.json()) as { submission: Submission };
@@ -139,7 +178,6 @@ export default function MapShell({ venues, initialSubmissions }: Props) {
     }
   }
 
-  // Memo so Map doesn't re-render unnecessarily.
   const ownedSet = useMemo(() => ownedIds, [ownedIds]);
 
   return (
@@ -156,6 +194,18 @@ export default function MapShell({ venues, initialSubmissions }: Props) {
       />
       <SearchBox venues={venues} onSelect={(v) => setFocus({ venue: v })} />
       <Lightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} />
+
+      {pendingDialog && (
+        <UploadDialog
+          exifCoords={pendingDialog.exifCoords}
+          dropCoords={pendingDialog.dropCoords}
+          previewSrc={pendingDialog.previewSrc}
+          onChoose={(c) => {
+            pendingDialog.resolve(c);
+            setPendingDialog(null);
+          }}
+        />
+      )}
 
       <input
         ref={fileInputRef}
