@@ -60,28 +60,28 @@ export default function UploadDialog({
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="bg-white rounded-xl shadow-xl max-w-md w-full p-5 space-y-4"
+        className="bg-white shadow-xl max-w-md w-full p-6 space-y-4"
       >
         <div className="flex gap-4 items-start">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={previewSrc}
             alt=""
-            className="w-20 h-20 object-cover rounded"
+            className="w-20 h-20 object-cover"
           />
           <div className="flex-1">
-            <h2 className="text-base font-semibold text-zinc-900">
+            <h2 className="text-lg text-zinc-900">
               Where should this photo live?
             </h2>
-            <p className="text-sm text-zinc-600 mt-1">
+            <p className="text-sm text-zinc-700 mt-2 leading-relaxed">
               This photo has location metadata. Pick which to use.
             </p>
           </div>
         </div>
 
-        <div className="space-y-2">
+        <div className="text-sm text-zinc-700 space-y-2">
           <label
-            className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer ${
+            className={`flex items-start gap-3 p-3 border cursor-pointer ${
               !exifInBounds
                 ? "border-zinc-200 opacity-50 cursor-not-allowed"
                 : choice === "exif"
@@ -97,10 +97,8 @@ export default function UploadDialog({
               onChange={() => setChoice("exif")}
               className="mt-0.5"
             />
-            <div className="flex-1 text-sm">
-              <div className="font-medium text-zinc-900">
-                Where the photo was taken
-              </div>
+            <div className="flex-1">
+              <div className="text-zinc-900">Where the photo was taken</div>
               <div className="text-xs text-zinc-500 mt-0.5 font-mono">
                 {exifCoords.lat.toFixed(5)}, {exifCoords.lng.toFixed(5)}
               </div>
@@ -118,7 +116,7 @@ export default function UploadDialog({
           </label>
 
           <label
-            className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer ${
+            className={`flex items-start gap-3 p-3 border cursor-pointer ${
               choice === "drop"
                 ? "border-black bg-zinc-50"
                 : "border-zinc-200 hover:bg-zinc-50"
@@ -131,10 +129,8 @@ export default function UploadDialog({
               onChange={() => setChoice("drop")}
               className="mt-0.5"
             />
-            <div className="flex-1 text-sm">
-              <div className="font-medium text-zinc-900">
-                Where you dropped it
-              </div>
+            <div className="flex-1">
+              <div className="text-zinc-900">Where you dropped it</div>
               <div className="text-xs text-zinc-500 mt-0.5 font-mono">
                 {dropCoords.lat.toFixed(5)}, {dropCoords.lng.toFixed(5)}
               </div>
@@ -142,18 +138,18 @@ export default function UploadDialog({
           </label>
         </div>
 
-        <div className="flex gap-2 justify-end pt-2">
+        <div className="flex gap-2 justify-end pt-1">
           <button
             type="button"
             onClick={() => onChoose("cancel")}
-            className="px-4 py-2 text-sm text-zinc-700 hover:bg-zinc-100 rounded-lg"
+            className="px-4 py-2 text-sm text-zinc-700 hover:bg-zinc-100"
           >
             Cancel
           </button>
           <button
             type="button"
             onClick={confirm}
-            className="px-4 py-2 text-sm bg-black text-white hover:bg-zinc-800 rounded-lg"
+            className="px-4 py-2 text-sm bg-black text-white hover:bg-zinc-800"
           >
             Upload
           </button>
